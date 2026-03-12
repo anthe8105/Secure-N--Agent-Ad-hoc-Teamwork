@@ -1,22 +1,4 @@
-# It Is Among Us: Identifying Adversaries in Ad-hoc Domains Using Q-valued Bayesian Estimations (Updated for DBBC and RAPO)
-
-<i>In Proceedings of the 23rd International Conference on Autonomous Agents and Multiagent Systems. 2024.</i> <a href="#alves2024amongus">[1]</a>
-
-Please cite us! 😄🤓
-
-```
-@inproceedings{alves2024amongus,
-  author = {do Carmo Alves, Matheus Aparecido and Varma, Amokh and Elkhatib, Yehia and Soriano Marcolino, Leandro},
-  title = {It Is Among Us: Identifying Adversaries in Ad-hoc Domains Using Q-valued Bayesian Estimations},
-  year = {2024},
-  isbn = {},
-  address = {Auckland, New Zealand},
-  abstract = {Ad-hoc teamwork models are crucial for solving distributed tasks in environments with unknown teammates. In order to improve performance, agents may collaborate in the same environment, trusting each other and exchanging information. However, what happens if there is an impostor among us? In this paper, we present BAE, a novel and efficient framework for online planning and estimation within ad-hoc teamwork domains where there is an adversarial agent disguised as teammates. Our approach considers the identification of the impostor through a process we term ``Q-valued Bayesian Estimations''. BAE can identify the adversary at the same time it performs ad-hoc estimation in order to improve coordination. Our results show that BAE has superior accuracy and faster reasoning capabilities in comparison to the state-of-the-art.},
-  booktitle = {Proceedings of the 23rd International Conference on Autonomous Agents and Multiagent Systems},
-  numpages = {9},
-  series = {AAMAS 2024}
-}
-```
+# Secure N-Agent Ad-hoc Teamwork
 
 ## WHAT ARE DBBC AND RAPO? :open_mouth:
 
