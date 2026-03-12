@@ -1,0 +1,122 @@
+\documentclass[11pt]{article}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{setspace}
+\onehalfspacing
+
+\title{\textbf{Technical Appendix: Comprehensive Implementation Details of the DBBC and RAPO Architecture in AdLeap-MAS}}
+\author{Implementation Documentation}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Introduction and Codebase Structure}
+This technical appendix provides an exhaustive, code-level breakdown of the integration of the Distributed Bayesian Belief Consensus (DBBC) module and the Risk-Aware Policy Optimization (RAPO) algorithm within the AdLeap-MAS simulation framework. The primary goal of the implementation is to establish a Centralized Training with Decentralized Execution (CTDE) Reinforcement Learning pipeline capable of detecting adversarial agents and mitigating sabotage risks in a Level Foraging environment. 
+
+The codebase is fundamentally divided into environment definition (\texttt{src/envs/}), heuristic and tree-based reasoning logic (\texttt{src/reasoning/}), data collection pipelines, offline dataset parsing (\texttt{src/data/}), and neural network modules (\texttt{src/models/}).
+
+\section{Environment and Agent Implementation (\texttt{src/envs/})}
+\subsection{Level Foraging Dynamics (\texttt{LevelForagingEnv.py})}
+The \texttt{LevelForagingEnv} class inherits from \texttt{AdhocReasoningEnv} and simulates a continuous-state grid world where agents must collaboratively forage tasks (targets) that possess specific minimum required capability levels. 
+
+\begin{itemize}
+    \item \textbf{State Representation:} The environment state consists of agent positions, directions, capabilities, and the status of tasks. It is represented as a state vector that flattens these attributes. 
+    \item \textbf{Action Space:} A discrete action space of size 5 is defined: \texttt{\{0: East, 1: West, 2: North, 3: South, 4: Load\}}. 
+    \item \textbf{Scenario Initialization:} Scenarios are instantiated via the \texttt{load\_default\_scenario} function. For instance, \texttt{Scenario 10} corresponds to a 10x10 map containing $N=3$ strategic agents (\texttt{A}, \texttt{S1}, \texttt{S2}), one regular teammate (\texttt{M1}), and two adversaries (\texttt{X1}, \texttt{X2}).
+\end{itemize}
+
+\subsection{Agent Types and Logic Evaluation}
+Agents in the simulation execute logic according to their assigned \texttt{type} string, which maps directly to reasoning implementations inside \texttt{src/reasoning/}.
+
+\begin{itemize}
+    \item \textbf{MCTS Planner (\texttt{mcts}):} Typically assigned to the Ad-hoc agent (\texttt{A}). The MCTS logic performs Monte Carlo rollouts from the current state to evaluate the expected rewards of potential actions, selecting the trajectory that maximizes cooperative returns based on Upper Confidence Bounds applied to Trees (UCT).
+    \item \textbf{Heuristic Teammates (\texttt{l1}, \texttt{l2}, \texttt{l3}, \texttt{l4}):} These types represent standard teammates with varying complexities of rule-based logic. Due to partial observability in the environment, they rely on geometric and coordinate-based heuristics rather than actual task requirements.
+    \begin{itemize}
+        \item \textbf{\texttt{l1}} agents rigidly navigate towards the \textit{furthest visible task} based on direct Euclidean distance calculations from their current position.
+        \item \textbf{\texttt{l2}} agents ignore distances and continuously target the task on the grid with the \textit{highest sum of coordinate values} ($x + y$).
+        \item \textbf{\texttt{l3}} agents calculate Euclidean distances to all visible tasks and blindly commit to navigating towards the \textit{nearest visible task}.
+        \item \textbf{\texttt{l4}} agents ignore distances and continuously target the task on the grid with the \textit{lowest sum of coordinate values} ($x + y$).
+    \end{itemize}
+    \item \textbf{Adversaries (\texttt{mcts\_min} and \texttt{deceptive\_impostor}):} 
+    \begin{itemize}
+        \item \textbf{\texttt{mcts\_min}} agents utilize the exact same state-space tree generation as the standard MCTS planner but invert the value function criteria, deliberately choosing the action that minimizes the team's cumulative reward score.
+        \item \textbf{\texttt{deceptive\_impostor}} agents follow standard cooperative foraging heuristics (\texttt{l1} - \texttt{l3}) until the state hits a critical condition or threshold. Once triggered, the internal heuristic switches to executing sub-optimal or intentionally blocking actions.
+    \end{itemize}
+\end{itemize}
+
+\section{Data Generation and Estimation Logging (\texttt{collect\_data.py})}
+The first phase of the DBBC framework involves logging local observations to train the consensus neural networks. This relies heavily on the \texttt{collect\_data.py} script.
+
+\subsection{The Estimation Loop}
+The simulation loop is parameterized to run with \texttt{method='mcts'}. At every timestep $t$, before selecting an action, the Ad-hoc agent applies the \textbf{Adaptive Greedy Algorithm (AGA)} (found in \texttt{src/reasoning/estmethods/aga.py}) across all observable agents. 
+
+The AGA module observes the recent state transitions and updates an internal Bayesian belief vector (representing the \textit{probability} that agent $j$ is of type \texttt{l1}, \texttt{l2}, \texttt{deceptive\_impostor}, etc.). This requires continuous simulation rollouts for each candidate type to verify which heuristic best predicts the observed state transition.
+
+\subsection{File I/O and \texttt{EstimationLogFile}}
+To guarantee persistent memory across simulations, the arrays returned by AGA are serialized into a CSV format separated by semicolons. The \texttt{EstimationLogFile} class writes several columns, notably:
+\begin{itemize}
+    \item \texttt{TypeEstimation}: Contains strings representing a list of probability distributions over the active heuristic templates for every agent in the observation radius.
+    \item \texttt{ParametersEstimation}: Records the physical scalar estimates (e.g., capability level, direction, bounds) for each agent.
+\end{itemize}
+
+\section{Offline Dataset Parsing (\texttt{src/data/dataset.py})}
+To process the generated raw text logs into valid PyTorch dimensions, the \texttt{AdhocSimulationDataset} class acts as the parser. 
+
+\subsection{Dynamic Agent Dimension Handling}
+Rather than relying on hardcoded constraints regarding the number of agents present in a map (Scenario 5 vs. Scenario 10), the code extracts the list length from the row \texttt{ParametersEstimation} dynamically via \texttt{len(raw\_params[i])}. It safely handles varying sizes and samples a random \texttt{target\_idx}.
+
+\subsection{Label Assignment (K-Parameter)}
+The binary label (Adversary $y=1$ vs. Teammate $y=0$) is inferred using the $K$ hyperparameter. The parser scans the target index against the total pool count \texttt{num\_agents} and asserts an adversary label if $\text{target\_idx} \ge \text{num\_agents} - K$. 
+
+\subsection{Dimensional Clamping and Padding}
+To prevent catastrophic shape-mismatch exceptions downstream during tensor operations:
+\begin{itemize}
+    \item The observation feature list is actively sliced or zero-padded to an exact length of $15$ variables per timestep.
+    \item A rolling window algorithm stitches $5$ consecutive rows together, resulting in a strictly formed \texttt{seq\_len = 5} observation timeline (\texttt{batch, 5, 15}).
+    \item The output probability vector from AGA (\texttt{TypeEstimation}) varies in size if the test scenario changes. The parsing loop forces the vector precisely to $7$ length by right-padding zeros ($\texttt{[0.0] * (7 - len(type\_probs))}$). A trailing $0.0$ is suffixed to complete the $8$-dimensional relational feature \texttt{rel\_features} required by the DBBC model.
+\end{itemize}
+Lastly, an episodic Min-Max normalizer mitigates scalar scaling defects across different maps.
+
+\section{DBBC: Distributed Bayesian Belief Consensus (\texttt{src/models/dbbc.py})}
+The belief generation algorithm is formally decoupled into two Python classes mathematically enforcing the analytical DBBC theorems.
+
+\subsection{\texttt{DBBCLocalEvidence} (Local Inference)}
+This class implements the localized mapping from temporal coordinates to an initial adversarial judgment. 
+\begin{itemize}
+    \item \textbf{GRU Encoder:} The $15$-dimensional temporal observation sequence is passed into a Gated Recurrent Unit (\texttt{batch\_first=True}), emitting a $32$-dimensional final hidden state encoding named $z_t$.
+    \item \textbf{Latent Integration:} The history vector $z_t$ and the $8$-dimensional relational feature $\psi_{ij}$ are concatenated over the feature dimension into a $40$-dimensional latent vector.
+    \item \textbf{Dual Linear Heads:} The latent block traverses two Dense layers. The network subsequently bifurcates into \texttt{mu\_head} to produce logit mean $\mu_i$ and \texttt{log\_std\_head} for the standard deviation. A Softplus activation ensures strictly positive uncertainty $\sigma_i = \text{softplus}(\log{\sigma}) + 1\text{e-6}$.
+\end{itemize}
+
+\subsection{\texttt{DBBCFusion} (Global Consensus)}
+This module lacks trainable weights but performs precision-weighted fusion over the multi-agent outputs.
+\begin{itemize}
+    \item \textbf{Precision Mapping:} It computes the precision factors of independent agents, defined as $w_k = 1 / (\sigma_k^2 + \epsilon)$.
+    \item \textbf{Weighted Average:} The function returns $\mu_{fused} = (\sum w_k \mu_k) / \sum w_k$. This inherently rejects input from isolated or unsure agents (characterized by high $\sigma^2$).
+    \item \textbf{Classification Output:} A final Sigmoid activation over $\mu_{fused}$ maps the aggregate logic space into the globally shared belief vector $B_t$.
+\end{itemize}
+
+\section{Risk-Aware Policy Optimization (\texttt{run\_rapo.py})}
+The \texttt{RAPOPPO} class encapsulates an Actor-Critic architecture that accepts $z_t$ and $B_t$ concatenated together as input across an $40$-dimensional dimension gap. The ultimate objective revolves around optimizing Risk-Aware CVaR penalties.
+
+\subsection{Centralized Training, Decentralized Execution}
+The script \texttt{run\_rapo.py} oversees the core CTDE implementation. The logic strictly enforces decentralized execution for the Strategic Agents array (\texttt{A}, \texttt{S1}, \texttt{S2}).
+
+\begin{enumerate}
+    \item \textbf{Array Collection:} Each episode initiation sequentially evaluates the environment string variables. Any agent index string containing \texttt{'A'} or prefixed with \texttt{'S'} is appended to the local strategic cohort memory list.
+    \item \textbf{Local Observations and RNN Cache:} At timestamp $t$, the execution layer iterates over every strategic agent recursively. Each agent pulls its respective observations to feed independently into \texttt{DBBCLocalEvidence}. The process generates localized metrics ($\mu_i$, $\sigma_i$) and crucially preserves the distinct spatial-temporal view generated by the GRU layout ($z_t^i$).
+    \item \textbf{Data Matrix Concatenation (Communication Phase):} The outputs $\mu_{1..N}$ and $\sigma_{1..N}$ across the distributed array are concatenated across `dim=-1` horizontally, forming dense tensors passed dynamically to \texttt{DBBCFusion} to formulate the shared $B_{t}$.
+    \item \textbf{Shared Policy Application:} Breaking from previous centralized setups where only Agent A decides actions, the updated architecture guarantees \textit{every} strategic agent passes its unique decoupled $(z_t^i, B_{t})$ pairing through the global \texttt{RAPOPPO} policy network to extract independent action coordinates. Actions are securely executed on the environment grid via the \texttt{step} function. 
+\end{enumerate}
+
+\end{document}
