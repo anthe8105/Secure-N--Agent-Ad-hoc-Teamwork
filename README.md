@@ -1,4 +1,4 @@
-# It Is Among Us: Identifying Adversaries in Ad-hoc Domains Using Q-valued Bayesian Estimations
+# It Is Among Us: Identifying Adversaries in Ad-hoc Domains Using Q-valued Bayesian Estimations (Updated for DBBC and RAPO)
 
 <i>In Proceedings of the 23rd International Conference on Autonomous Agents and Multiagent Systems. 2024.</i> <a href="#alves2024amongus">[1]</a>
 
@@ -18,25 +18,18 @@ Please cite us! 😄🤓
 }
 ```
 
-## WHAT IS BAE? :open_mouth:
+## WHAT ARE DBBC AND RAPO? :open_mouth:
 
-<p style="text-align: justify; text-indent: 10px;" >
-<i>BAE</i> is a novel and efficient framework for online planning in ad-hoc teamwork domains capable of performing estimations about adversarial agent disguised as a teammate. Our approach considers the identification of the impostor through a process we term ``Q-valued Bayesian Estimations''. BAE can identify the adversary at the same time it performs ad-hoc estimation in order to improve coordination. Our results show that BAE has superior accuracy and faster reasoning capabilities in comparison to the state-of-the-art. More detail and information about our approach can be found in <a href="#alves2024amongus">our paper [1]</a>.
-</p>
+This repository represents an updated iteration of the original framework, now implementing **DBBC (Distributed Bayesian Belief Consensus)** and **RAPO (Risk-Aware Policy Optimization)** architectures. The legacy BAE files have been largely removed or integrated. The codebase now focuses on handling adversarial agent detection in an ad-hoc setting through distributed evidence fusion (DBBC) and decentralized risk-aware reinforcement learning execution (RAPO).
 
-        
 ## SUMMARY
 
 In this README you can find:
-
-- [It Is Among Us: Identifying Adversaries in Ad-hoc Domains Using Q-valued Bayesian Estimations](#it-is-among-us-identifying-adversaries-in-ad-hoc-domains-using-q-valued-bayesian-estimations)
-  - [WHAT IS BAE? :open\_mouth:](#what-is-bae-open_mouth)
-  - [SUMMARY](#summary)
-  - [GET STARTED](#get-started)
-    - [1. Dependencies :pencil:](#1-dependencies-pencil)
-    - [2. Usage :muscle:](#2-usage-muscle)
-  - [More details about BAE](#more-details-about-bae)
-  - [REFERENCES](#references)
+- [WHAT ARE DBBC AND RAPO?](#what-are-dbbc-and-rapo-open_mouth)
+- [GET STARTED](#get-started)
+  - [1. Dependencies](#1-dependencies-pencil)
+  - [2. Usage Workflow](#2-usage-workflow-muscle)
+- [REFERENCES](#references)
 
 ## GET STARTED
 
@@ -44,55 +37,39 @@ In this README you can find:
 
 <b>- About this repository</b>
 
-This repository represents a streamlined version of the environment used during our research and proposal of BAE.
-We removed some files and improved comments in order to facilitate your reading and understanding through the code. :smile:
+This repository relies on PyTorch as well as several standard machine learning packages. Ensure your virtual environment is properly configured.
+Install the dependencies using:
 
-As mentioned in our paper, we utilized the <a href="#alves2022adleapmas"><i>AdLeap-MAS</i> framework [2]</a> to conduct all experiments and analyze the results. Therefore, the dependencies outlined here mirror those of the framework; however, we provide the minimal set required to run BAE's code, the baselines and the benchmarks presented in the paper, double-check `requirements.txt`.
-
-<b>- Encountering issues while running our code?</b> :fearful:
-
-<p style="text-align: justify; text-indent: 0px;">
- If you find yourself unable to resolve them using our tutorial, we recommend consulting the <a href="https://github.com/lsmcolab/adleap-mas/">AdLeap-MAS GitHub page</a> for additional guidance on troubleshooting common problems or contact us here on GitHub!
-</p>
-
-------------------------
-### 2. Usage :muscle:
-
-<b>- Quick experience</b>
-
-For a quick experience, we recommend running the default `main.py` file, which will run a BAE's experiment in the Level-based Foraging environment, small scenario. By default, the display will pop-up for visual evaluation of the agent's behaviour and a result file will be created in `results/` folder, which can be directly used in plots later.
-
-<b>- Running different environments and baselines</b>
-
-If you want to run your experiment in other environments, you will find some options at the top of the `main.py` file.
-
-```python
-# 1. Setting the environment
-method = 'mcts'                 # choose your method (we used only mcts in this paper)
-scenario_id = 5                 # define your scenario configuration. Options: [5,6,7,8]
-estimation_method = 'bae'       # choosing your estimation method. Options: ['bae','aga','abu','oeata_a]
-
-display = True                  # choosing to turn on or off the display
+```bash
+pip install -r requirements.txt
 ```
 
-Directly, you can change the Level-based Foraging scenario by modifying the `scenario_id` variable there.
-We have 4 different options for `scenarios_id`: `[5,6,7,8]`.
-All scenarios were tested and evaluated in our paper.
+### 2. Usage Workflow :muscle:
 
-Now, if you want to change the estimation_method used in the experiments, you can change the `estimation_method` variable.
-In summary, we have 4 different estimation methods available: `['bae','aga','abu','oeata_a]`.
-All baselines are introduced and tested in our paper.
+The current project workflow incorporates data collection, DBBC fusion models, and RAPO distributed execution.
 
-Finally, you can choose to turn on or off the display using `display = True` or `display = False`, respectively.
+<b>1. Data Collection</b>
+Run simulations to collect observation/action histories for training DBBC models. The output logs will be stored as CSV files inside the `results/` folder.
+```bash
+python collect_data.py
+```
 
-And that's it folks. Easy and ready to use. :innocent:
+<b>2. Train Modalities (DBBC, RAPO, and Baselines)</b>
+You can use the various training scripts included in the repository depending on which framework layer you wish to build:
+- **`train_dbbc.py`**: Trains the Distributed Bayesian Belief Consensus module (`dbbc_pretrained.pth`) to perform fusion for adversary detection.
+- **`train_rapo.py`**: Trains the Risk-Aware Policy Optimization PPO agent (`rapo_pretrained.pth`) on top of the DBBC structures.
+- **`train_baselines.py`**: Runs training loops for various baseline models.
 
-------------------------
-## More details about BAE
+<b>3. Run & Evaluate the Methods</b>
+To evaluate DBBC predictions using simulated CSV records:
+```bash
+python evaluate_dbbc.py
+```
+To run RAPO in our testing scenarios taking into consideration fully distributed inference natively:
+```bash
+python run_rapo.py
+```
 
-*~We are working on it and additional details will be available soon~*
-
-------------------------
 ## REFERENCES
 
 <a name="alves2024amongus">[1]</a> Matheus Aparecido do Carmo Alves, Amokh Varma, Yehia Elkhatib, and Leandro Soriano Marcolino. 2024. <b>It Is Among Us: Identifying Adversaries in Ad-hoc Domains Using Q-valued Bayesian Estimations</b>. In Proceedings of the 23rd International Conference on Autonomous Agents and Multiagent Systems (AAMAS '24). Auckland, New Zealand.
