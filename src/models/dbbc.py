@@ -109,3 +109,122 @@ def calculate_dbbc_losses(shared_beliefs, ground_truths, lambda_cal=0.1):
     l_belief = l_det + lambda_cal * l_cal
     
     return l_belief, l_det, l_cal
+
+
+# ---------------------------------------------------------------------------
+# DBBCDetector: simplified single-observer variant for state-based training
+# ---------------------------------------------------------------------------
+
+class DBBCDetector(nn.Module):
+    """
+    Simplified DBBC detector for the small 3-agent scenario (N=1 strategic).
+
+    Aligned with paper §3.1:
+      - Recurrent encoder Enc_phi: GRU over h_t = (o_0,a_0,...,o_t,a_t)
+      - MLP head: z_t → b_t(j) ∈ [0,1]  (adversary belief for agent j)
+      - Loss: BCE(b,y) + lambda_cal·MSE(b,y)  (paper Eq. 8)
+
+    No PoE fusion is needed here because N=1 (single strategic observer).
+    Relative positions are encoded inside the observation vector, so no
+    separate relational feature branch is required.
+
+    Args:
+        input_dim:  obs_dim + action_dim (default 11+5=16)
+        hidden_dim: GRU hidden size (default 32)
+    """
+    def __init__(self, input_dim=16, hidden_dim=32):
+        super(DBBCDetector, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+
+        # Enc_phi: recurrent encoder over (obs, action) history
+        self.encoder = nn.GRU(input_size=input_dim, hidden_size=hidden_dim, batch_first=True)
+
+        # MLP head: z_t → belief b_t(j)
+        self.fc1 = nn.Linear(hidden_dim, 64)
+        self.fc2 = nn.Linear(64, 1)
+
+    def forward(self, seq):
+        """
+        seq: (batch, seq_len, input_dim)  — concatenated (obs, action) history
+
+        Returns:
+            belief: (batch, 1) — probability that the observed agent is an adversary
+        """
+        _, hidden = self.encoder(seq)          # hidden: (1, batch, hidden_dim)
+        z_t = hidden.squeeze(0)                # (batch, hidden_dim)
+
+        x = F.relu(self.fc1(z_t))
+        belief = torch.sigmoid(self.fc2(x))    # (batch, 1)
+        return belief
+
+
+# ---------------------------------------------------------------------------
+# DBBCMultiObserver: full DBBC with N>1 strategic agents + PoE fusion
+# ---------------------------------------------------------------------------
+
+class DBBCMultiObserver(nn.Module):
+    """
+    Full DBBC for N strategic agents observing uncontrolled agents (paper §3.1).
+
+    For each uncontrolled target agent j:
+      1. Each strategic agent i runs DBBCLocalEvidence(h_t^{ij}, ψ_t^{ij})
+         → (μ_{ij,t}, σ_{ij,t}, local_belief_{ij,t})
+      2. DBBCFusion merges across all i (precision-weighted PoE):
+         → (μ̃_t(j), σ̃_t(j), shared_belief_t(j))
+      3. Loss: BCE(b̃, y_j) + λ·MSE(b̃, y_j)  per agent j  (Eq. 8)
+
+    This wrapper creates N independent DBBCLocalEvidence modules (one per
+    strategic observer) and a single DBBCFusion module.
+
+    Args:
+        n_observers:   Number of strategic agents (N)
+        input_dim:     obs_dim + action_dim  (e.g. 13+5=18 for Scenario 14)
+        hidden_dim:    GRU hidden size
+        rel_feat_dim:  Relational feature dimension (default 3)
+    """
+    def __init__(self, n_observers, input_dim=18, hidden_dim=64, rel_feat_dim=3):
+        super(DBBCMultiObserver, self).__init__()
+        self.n_observers = n_observers
+
+        # One local evidence encoder per strategic observer
+        self.encoders = nn.ModuleList([
+            DBBCLocalEvidence(
+                obs_dim=input_dim,      # obs_action_dim (GRU input)
+                action_dim=0,           # action already concatenated into input_dim
+                hidden_dim=hidden_dim,
+                rel_feat_dim=rel_feat_dim
+            )
+            for _ in range(n_observers)
+        ])
+        self.fusion = DBBCFusion()
+
+    def forward(self, seqs, rel_features):
+        """
+        Args:
+            seqs:         (batch, N, seq_len, input_dim)
+            rel_features: (batch, N, rel_feat_dim)
+
+        Returns:
+            shared_belief: (batch, 1) — fused adversary probability
+            fused_mu:      (batch, 1) — fused logit
+            fused_sigma:   (batch, 1) — fused uncertainty
+        """
+        mus = []
+        sigmas = []
+        for i, encoder in enumerate(self.encoders):
+            seq_i = seqs[:, i, :, :]            # (batch, seq_len, input_dim)
+            rel_i = rel_features[:, i, :]       # (batch, rel_feat_dim)
+            mu_i, sigma_i, _ = encoder(seq_i, rel_i)
+            mus.append(mu_i)                    # (batch, 1)
+            sigmas.append(sigma_i)              # (batch, 1)
+
+        # Stack along observer dimension: (batch, N)
+        mus    = torch.cat(mus,    dim=-1)      # (batch, N)
+        sigmas = torch.cat(sigmas, dim=-1)      # (batch, N)
+
+        # Precision-weighted fusion (paper Eq. 3-5)
+        fused_mu, fused_sigma, shared_belief = self.fusion(mus, sigmas)
+
+        return shared_belief, fused_mu, fused_sigma
+

@@ -364,7 +364,90 @@ def load_default_scenario_components(method,scenario_id):
         ],
         'obstacles':[]
         },
+        {
+        # Scenario 13: Minimal adversarial scenario for state-based detection training
+        # 3x3 grid, N=1 strategic (adhoc A), M=1 uncontrolled teammate (T), K=1 adversary (X)
+        'dim': (3, 3),
+        'type_knowledge': False,
+        'template_types': ['l3', 'deceptive_impostor'],
+        'parameter_knowledge': False,
+        'vision_block': False,  # Full visibility so adhoc always observes all agents
+        'agents': [
+            Agent(index='A', atype=method, position=(0, 0),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+            Agent(index='T', atype='l3', position=(0, 2),
+                  direction=0, radius=1., angle=1., level=0.5),
+            Agent(index='X', atype='deceptive_impostor', position=(2, 2),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+        ],
+        'adhoc_agent_index': 'A',
+        'impostor_index': 'X',
+        'tasks': [
+            Task(index='0', position=(1, 1), level=0.5),
+            Task(index='1', position=(2, 0), level=0.5),
+        ],
+        'obstacles': []
+        },
+        {
+        # Scenario 14: 5x5, N=2 strategic, M=1 teammate, K=2 adversaries, 3 tasks
+        # Multi-observer DBBC with PoE fusion.
+        'dim': (5, 5),
+        'type_knowledge': False,
+        'template_types': ['l3', 'l4', 'deceptive_impostor'],
+        'parameter_knowledge': False,
+        'vision_block': False,  # Full visibility for state-based detection
+        'agents': [
+            Agent(index='A1', atype=method, position=(0, 0),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+            Agent(index='A2', atype='l4', position=(0, 4),
+                  direction=0, radius=1., angle=1., level=0.5),
+            Agent(index='T', atype='l3', position=(2, 2),
+                  direction=0, radius=1., angle=1., level=0.5),
+            Agent(index='X1', atype='deceptive_impostor', position=(4, 0),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+            Agent(index='X2', atype='deceptive_impostor', position=(4, 4),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+        ],
+        'adhoc_agent_index': 'A1',
+        'impostor_index': ['X1', 'X2'],
+        'tasks': [
+            Task(index='0', position=(1, 1), level=0.5),
+            Task(index='1', position=(3, 1), level=0.5),
+            Task(index='2', position=(2, 4), level=0.5),
+        ],
+        'obstacles': []
+        },
+        {
+        # Scenario 15: 5x5, N=2 strategic, M=1 teammate, K=2 adversaries
+        # Different positions from Sc14, adversaries use mcts_min (reward-minimizing MCTS)
+        'dim': (5, 5),
+        'type_knowledge': False,
+        'template_types': ['l3', 'l4', 'mcts_min'],
+        'parameter_knowledge': False,
+        'vision_block': False,
+        'agents': [
+            Agent(index='A1', atype=method, position=(2, 0),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+            Agent(index='A2', atype='l4', position=(4, 2),
+                  direction=0, radius=1., angle=1., level=0.5),
+            Agent(index='T', atype='l3', position=(0, 4),
+                  direction=0, radius=1., angle=1., level=0.5),
+            Agent(index='X1', atype='mcts_min', position=(1, 2),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+            Agent(index='X2', atype='mcts_min', position=(3, 4),
+                  direction=1*np.pi/2, radius=1., angle=1., level=0.5),
+        ],
+        'adhoc_agent_index': 'A1',
+        'impostor_index': ['X1', 'X2'],
+        'tasks': [
+            Task(index='0', position=(0, 1), level=0.5),
+            Task(index='1', position=(4, 0), level=0.5),
+            Task(index='2', position=(3, 3), level=0.5),
+        ],
+        'obstacles': []
+        },
     ]
+
 
     if scenario_id >= len(default_scenarios_components):
         print('There is no default scenario with id '+str(scenario_id)+
@@ -686,8 +769,9 @@ def levelforaging_transition(action, real_env):
             # teammates reasoning
             if real_env.reasoning_turn == 'adhoc':
                 for agent in real_env.components['agents']:
-                    if agent.index != adhoc_agent.index and\
-                    agent.index != real_env.components['impostor_index']:
+                    imp_idx = real_env.components['impostor_index']
+                    is_imp = (agent.index in imp_idx) if isinstance(imp_idx, list) else (agent.index == imp_idx)
+                    if agent.index != adhoc_agent.index and not is_imp:
                         # changing the perspective
                         copied_env = real_env.copy()
                         copied_env.components['adhoc_agent_index'] = agent.index
@@ -714,8 +798,13 @@ def levelforaging_transition(action, real_env):
                 real_env.reasoning_turn = 'adversarial'
                 adhoc_index = real_env.components['adhoc_agent_index']
                 impostor_index = real_env.components['impostor_index']
-                real_env.components['adhoc_agent_index'] = impostor_index
+                # Save original impostor_index (may be a list) for restoration
+                real_env._orig_impostor_index = impostor_index
+                # For list impostor_index, swap with first impostor only
+                swap_imp = impostor_index[0] if isinstance(impostor_index, list) else impostor_index
+                real_env.components['adhoc_agent_index'] = swap_imp
                 real_env.components['impostor_index'] = adhoc_index
+
 
             elif real_env.reasoning_turn == 'adversarial':
                 # environment step
@@ -727,10 +816,16 @@ def levelforaging_transition(action, real_env):
 
                 # changing perspectives from adversarial to adhoc
                 real_env.reasoning_turn = 'adhoc'
+                # Restore: adhoc_index was stored in impostor_index during the swap
                 adhoc_index = real_env.components['impostor_index']
-                impostor_index = real_env.components['adhoc_agent_index']
                 real_env.components['adhoc_agent_index'] = adhoc_index
-                real_env.components['impostor_index'] = impostor_index
+                # Restore original impostor_index (may be a list)
+                if hasattr(real_env, '_orig_impostor_index'):
+                    real_env.components['impostor_index'] = real_env._orig_impostor_index
+                else:
+                    impostor_index = real_env.components['adhoc_agent_index']
+                    real_env.components['impostor_index'] = impostor_index
+
 
             # calculating the instantaneous sabotage risk
             risk, entanglements = real_env.calculate_risk(adhoc_agent)
@@ -743,7 +838,9 @@ def levelforaging_transition(action, real_env):
         # in real world
         else:
             for agent in real_env.components['agents']:
-                if agent.index == real_env.components['impostor_index']:
+                imp_idx = real_env.components['impostor_index']
+                is_imp = (agent.index in imp_idx) if isinstance(imp_idx, list) else (agent.index == imp_idx)
+                if is_imp:
                     # changing the perspective
                     copied_env = real_env.copy()
                     copied_env.components['adhoc_agent_index'] = agent.index
@@ -1014,9 +1111,21 @@ class LevelForagingEnv(AdhocReasoningEnv):
     
     def is_adversarial(self):
         if 'impostor_index' in self.components:
-            if self.components['impostor_index'] is not None:
+            idx = self.components['impostor_index']
+            if idx is not None:
+                if isinstance(idx, list):
+                    return len(idx) > 0
                 return True
         return False
+
+    def _is_impostor(self, agent_index):
+        """Check if agent_index is an impostor, supporting both str and list."""
+        idx = self.components.get('impostor_index')
+        if idx is None:
+            return False
+        if isinstance(idx, list):
+            return agent_index in idx
+        return agent_index == idx
 
     def adversarial_policy(self):
         return np.random.choice([0,1,2,3])
